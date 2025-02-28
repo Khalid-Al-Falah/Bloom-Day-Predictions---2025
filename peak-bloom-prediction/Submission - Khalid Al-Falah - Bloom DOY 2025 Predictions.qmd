@@ -5,22 +5,6 @@ format: pdf
 editor: visual
 ---
 
-## Abstract
-
-In determining which features to analyze, one key factor came to mind: temperature. The blooming of most flowering plants is directly influenced by the amount of heat energy they accumulate before winter. For cherry blossoms, this process occurs in two distinct phases:
-
-1\) Chilling Period – When average temperatures drop to 40–45°F (approximately 4.4–7.8°C), the tree enters dormancy.
-
-2\) Warming Period – Once temperatures rise again, the tree begins to accumulate heat, signaling that it is time to bloom. It also uses this period of time to absorb energy for the following year as well.
-
-This relationship between cherry blossoms and Chilling/Warming Periods formed the foundation of my predictive model. To build the model, I first obtained weekly average historical temperatures (1973–2024) for each location. Each week was classified as either a Chilling or Warming Period based on temperature thresholds. Then, I transformed the data using pivot_wider(), creating separate columns for each week-period combination within each year.
-
-Next, I merged this processed temperature data with historical bloom dates, joining by location and year. To predict the 2025 bloom date, I incorporated estimated temperatures up to April 2025, formatted in the same structure as the historical data.
-
-Given the large number of features (\~90), I used an elastic net regression model, which is well-suited for handling high-dimensional data by selecting the most relevant features. Additionally, I applied linear weights to the historical data, giving more recent years greater influence in the predictions. The model was then cross-validated to optimize the lambda parameter, ensuring the best possible balance between regularization and predictive performance.
-
-Finally, using this trained elastic net model, I predicted the 2025 bloom DOY, using the estimated 2025 temperatures and locations as inputs.
-
 ## Setup Code
 
 ```{r}
