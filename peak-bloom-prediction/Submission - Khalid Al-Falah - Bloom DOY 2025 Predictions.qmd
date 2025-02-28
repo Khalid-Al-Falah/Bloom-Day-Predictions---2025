@@ -1,0 +1,394 @@
+---
+title: "Khalid Al-Falah - Cherry Blossom Predictions 2025"
+author: "Khalid Al-Falah"
+format: pdf
+editor: visual
+---
+
+## Abstract
+
+In determining which features to analyze, one key factor came to mind: temperature. The blooming of most flowering plants is directly influenced by the amount of heat energy they accumulate before winter. For cherry blossoms, this process occurs in two distinct phases:
+
+1\) Chilling Period – When average temperatures drop to 40–45°F (approximately 4.4–7.8°C), the tree enters dormancy.
+
+2\) Warming Period – Once temperatures rise again, the tree begins to accumulate heat, signaling that it is time to bloom. It also uses this period of time to absorb energy for the following year as well.
+
+This relationship between cherry blossoms and Chilling/Warming Periods formed the foundation of my predictive model. To build the model, I first obtained weekly average historical temperatures (1973–2024) for each location. Each week was classified as either a Chilling or Warming Period based on temperature thresholds. Then, I transformed the data using pivot_wider(), creating separate columns for each week-period combination within each year.
+
+Next, I merged this processed temperature data with historical bloom dates, joining by location and year. To predict the 2025 bloom date, I incorporated estimated temperatures up to April 2025, formatted in the same structure as the historical data.
+
+Given the large number of features (\~90), I used an elastic net regression model, which is well-suited for handling high-dimensional data by selecting the most relevant features. Additionally, I applied linear weights to the historical data, giving more recent years greater influence in the predictions. The model was then cross-validated to optimize the lambda parameter, ensuring the best possible balance between regularization and predictive performance.
+
+Finally, using this trained elastic net model, I predicted the 2025 bloom DOY, using the estimated 2025 temperatures and locations as inputs.
+
+## Setup Code
+
+```{r}
+library(tidyverse)
+library(rvest)
+library(readxl)
+library(dplyr)
+library(glmnet)
+source("replicated_cv_glmnet.R")
+```
+
+Initialize 2025 Estimate Weather Data
+
+```{r}
+
+get_weather_table <- function(url)
+  read_html(url) %>% 
+  html_nodes("div.monthly-calendar") %>% 
+  html_text2() %>%
+  str_replace("N/A", "N/A N/A") %>%
+  str_remove_all("°|Hist. Avg. ") %>%
+  str_split(" ", simplify = TRUE) %>%
+  parse_number() %>%
+  matrix(ncol = 3, 
+         byrow = TRUE,
+         dimnames = list(NULL, c("day", "tmax", "tmin"))) %>%
+  as_tibble() %>%
+  filter(
+    row_number() %in%
+      (which(diff(day) < 0) %>% (function(x) if(length(x) == 1) seq(1, x[1], 1) else seq(x[1] + 1, x[2], 1))))
+
+# NOTE: Kyoto code no longer works as archive.org has removed the base url.
+# However, a copy of this data was stored into the kyoto_202.xlsx file, which can be used instead.
+
+#kyoto <-
+  #tibble(
+    #base_url = "https://web.archive.org/web/20250225/https://www.accuweather.com/en/jp/arashiyama/2334469/",
+    #month = month.name[1:4],
+    #year = 2025,
+    #url = str_c(base_url, tolower(month), "-weather/2334469?year=", year)) %>%
+  #mutate(temp = map(url, get_weather_table)) %>%
+  #pull(temp) %>%
+  #reduce(bind_rows) %>%
+  #transmute(date = seq(as.Date("2025-01-01"), as.Date("2025-04-30"), 1),
+            #year = parse_number(format(date, "%Y")),
+            #tmax,
+            #tmin,
+            #temp = (tmax + tmin) / 2)
+
+kyoto <- read_xlsx("kyoto_2025.xlsx")
+
+#liestal march
+liestal <-
+  tibble(
+    base_url = "https://web.archive.org/web/20250225/https://www.accuweather.com/en/ch/liestal/311994/",
+    month = month.name[1:4],
+    year = 2025,
+    url = str_c(base_url, tolower(month), "-weather/311994?year=", year)) %>%
+  mutate(temp = map(url, get_weather_table)) %>%
+  pull(temp) %>%
+  reduce(bind_rows) %>%
+  transmute(date = seq(as.Date("2025-01-01"), as.Date("2025-04-30"), 1),
+            year = parse_number(format(date, "%Y")),
+            tmax,
+            tmin,
+            temp = (tmax + tmin) / 2)  
+
+newyork <-
+  tibble(
+    base_url = "https://web.archive.org/web/20250225/https://www.accuweather.com/en/us/new-york/10021/",
+    month = month.name[1:4],
+    year = 2025,
+    url = str_c(base_url, tolower(month), "-weather/349727?year=", year)) %>%
+  mutate(temp = map(url, get_weather_table)) %>%
+  pull(temp) %>%
+  reduce(bind_rows) %>%
+  transmute(date = seq(as.Date("2025-01-01"), as.Date("2025-04-30"), 1),
+            year = parse_number(format(date, "%Y")),
+            tmax,
+            tmin,
+            temp = (tmax + tmin) / 2)
+
+washington <-
+  tibble(
+    base_url = "https://web.archive.org/web/20250225/https://www.accuweather.com/en/us/washington/20006/",
+    month = month.name[1:4],
+    year = 2025,
+    url = str_c(base_url, tolower(month), "-weather/18-327659_1_al?year=", year)) %>%
+  mutate(temp = map(url, get_weather_table)) %>%
+  pull(temp) %>%
+  reduce(bind_rows) %>%
+  transmute(date = seq(as.Date("2025-01-01"), as.Date("2025-04-30"), 1),
+            year = parse_number(format(date, "%Y")),
+            tmax,
+            tmin,
+            temp = (tmax + tmin) / 2)  
+
+vancouver <-
+  tibble(
+    base_url = "https://web.archive.org/web/20250225/https://www.accuweather.com/en/us/vancouver/98661/",
+    month = month.name[1:4],
+    year = 2025,
+    url = str_c(base_url, tolower(month), "-weather/331419?year=", year)) %>%
+  mutate(temp = map(url, get_weather_table)) %>%
+  pull(temp) %>%
+  reduce(bind_rows) %>%
+  transmute(date = seq(as.Date("2025-01-01"), as.Date("2025-04-30"), 1),
+            year = parse_number(format(date, "%Y")),
+            tmax,
+            tmin,
+            temp = (tmax + tmin) / 2)  
+
+# Update all tables to have their respective locations
+washington <- washington %>%
+  mutate(location = "washingtondc")
+kyoto <- kyoto %>%
+  mutate(location = "kyoto")
+liestal <- liestal %>%
+  mutate(location = "liestal")
+vancouver <- vancouver %>%
+  mutate(location = "vancouver")
+newyork <- newyork %>%
+  mutate(location = "newyorkcity")
+
+```
+
+Obtain Historic Temperature and Cherry Blossom data:
+
+```{r}
+# Gather historic temperature and cherry blossom data
+historic_temperatures <- read_excel("historic_temperatures.xlsx")
+
+# Gather cherry blossom data
+cherry <- read.csv("data/washingtondc.csv") |> 
+  bind_rows(read.csv("data/liestal.csv")) |> 
+  bind_rows(read.csv("data/kyoto.csv")) |> 
+  bind_rows(read.csv("data/vancouver.csv")) |> 
+  bind_rows(read.csv("data/nyc.csv"))
+
+# Filter out blossom data after 1973 (no weather data before then)
+rel_cherry_data <- cherry %>%
+  filter(year >= 1973) %>%
+  select(-bloom_date)
+
+# Get estimated 2025 weather data
+weather_2025_estimates <- washington |> 
+  bind_rows(liestal) |> 
+  bind_rows(kyoto) |> 
+  bind_rows(vancouver) |> 
+  bind_rows(newyork)
+
+# Convert estimated data into proper format
+y <- weather_2025_estimates %>%
+  pivot_longer(cols = c(tmax, tmin, temp), names_to = "datatype", values_to = "value") %>%
+  mutate(
+    datatype = case_when(
+      datatype == "tmax" ~ "TMAX",
+      datatype == "tmin" ~ "TMIN",
+      datatype == "temp" ~ "TAVG",
+      TRUE ~ datatype  # Default case (shouldn't be needed, but good practice)
+    ),
+    value = (value - 32) * 5/9  # Convert Fahrenheit to Celsius
+  )
+# Merge estimates with historic temperatures
+x <- historic_temperatures %>%
+  mutate(year = year(date)) %>%
+  filter(year != 2025) %>%
+  bind_rows(y) %>%
+  select(-station)
+# Add warming and chilling periods
+temp_with_periods <- x %>%
+  mutate(Year = year(date), 
+         Period = case_when(
+           value <= 7.7778  ~ "Chilling Period",
+           TRUE ~ "Warming Period"))   # Default case
+# Split estimates into weeks
+b <- temp_with_periods %>%
+  filter(datatype == 'TAVG') %>%
+  mutate(Week = week(date)) %>%
+  group_by(location, Year, Week) %>%
+  summarize(avg_TAVG = mean(value, na.rm = TRUE), .groups = "drop") %>%
+  mutate(Period = case_when(
+    avg_TAVG <= 7.7778  ~ "Chilling Period",
+    TRUE ~ "Warming Period"))   # Default case
+
+# Ensure col name for cherry data
+colnames(rel_cherry_data)[colnames(rel_cherry_data) == "year"] <- "Year"
+# Create final data set. Exclude 2025 information
+final_data <- b %>%
+  pivot_wider(names_from=c(Week, Period), values_from = avg_TAVG) %>%
+  left_join(rel_cherry_data, by = c("location", "Year")) %>%
+  filter(Year != 2025)
+# Remove these observations. They have no bloom data
+final_data <- final_data %>%
+  filter(!(location == "newyorkcity" & Year == 2023) & 
+           !(location == "vancouver" & Year == 2021))
+```
+
+Set Up 2025 Weather Estimates into correct format:
+
+```{r}
+# Set up 2025 estimated data to be in same format as final data
+data_2025 <- b %>%
+  pivot_wider(names_from=c(Week, Period), values_from = avg_TAVG) %>%
+  left_join(rel_cherry_data, by = c("location", "Year")) %>%
+  filter(Year == 2025)
+
+# Extract location and coordinate information from final_data
+location_coords <- final_data %>%
+  select(location, lat, long, alt) %>%
+  distinct(location, .keep_all = TRUE)  # Ensure only one row per location
+
+
+# Join the extracted coordinates with data_2025
+data_2025 <- data_2025 %>%
+  left_join(location_coords, by = "location") %>%
+  mutate(
+    lat = coalesce(lat.x, lat.y),
+    long = coalesce(long.x, long.y),
+    alt = coalesce(alt.x, alt.y)
+  ) %>%
+  select(-lat.x, -lat.y, -long.x, -long.y, -alt.x, -alt.y)  # Remove duplicate columns
+```
+
+Conduct testing with Elastic Net:
+
+```{r}
+# Manually create the design matrix, without the intercept!
+cherry_train <- final_data %>%
+  filter(Year < 2024)
+cherry_test <- final_data %>%
+  filter(Year >= 2023)
+
+all_locations <- unique(final_data$location)  # Get all unique locations in full dataset
+
+# Make sure cherry_train has correct # of levels for locations
+cherry_train <- cherry_train %>%
+  mutate(location = factor(location, levels = all_locations))
+# Make sure nas are replaced with 0s
+cherry_train <- cherry_train %>%
+  mutate(across(matches("Chilling Period|Warming Period"), ~ replace_na(., 0)))
+# Add linear weights to the data
+cherry_train <- cherry_train %>%
+  mutate(weight = exp(Year - max(Year)))
+
+# Do the same for cherry_test
+cherry_test <- cherry_test %>%
+  mutate(location = factor(location, levels = all_locations))
+cherry_test <- cherry_test %>%
+  mutate(across(matches("Chilling Period|Warming Period"), ~ replace_na(., 0)))
+cherry_test <- cherry_test %>%
+  mutate(weight = exp((Year - min(Year)) / (max(Year) - min(Year))))
+
+# Update final_data to also have the levels just in case we want it later
+final_data <- final_data %>%
+  mutate(location = factor(location, levels = all_locations))
+
+# Create the model matrix
+model_matrix <- model.matrix(bloom_doy ~ . - weight, data = cherry_train)[, -1]
+# Create the model
+lasso_fit <- glmnet(x = model_matrix,
+                    y = cherry_train$bloom_doy,
+                    family = "gaussian", alpha = 0, weights = cherry_train$weight)
+# Cross validate
+set.seed(123)
+cv_fit <- replicated_cv_glmnet(
+  x = model_matrix,
+  y = cherry_train$bloom_doy,
+  replications = 10,  # Number of replications
+  family = "gaussian",
+  alpha = 0,  # Elastic Net (0 = Ridge, 1 = Lasso)
+  nfolds = 15  # Number of folds,
+)
+
+best_lambda <- cv_fit$lambda.min
+lambda_1se <- cv_fit$lambda.1se
+
+# Fit the final model using the optimal lambda
+final_model <- glmnet(
+  x = model_matrix,
+  y = cherry_train$bloom_doy,
+  family = "gaussian",
+  alpha = 0,
+  lambda = best_lambda,
+  weights = cherry_train$weight
+)
+
+
+# Prepare test set matrix
+x_test <- model.matrix(bloom_doy ~ . -weight, data = cherry_test)[, -1]
+
+# Predict bloom dates
+predictions <- predict(final_model, newx = x_test)
+
+# Compare predictions with actual bloom dates
+results <- data.frame(
+  Year = cherry_test$Year,
+  Actual = cherry_test$bloom_doy,
+  Predicted = as.vector(predictions)
+)
+
+print(results)
+# Compute RMSE (Root Mean Squared Error)
+rmse <- sqrt(mean((results$Actual - results$Predicted)^2))
+cat("RMSE:", rmse, "\n")
+```
+
+## 2025 Prediction Code
+
+```{r}
+# Predicting 2025 data. We need to create a model using the most recent historic temperatures
+# Set up final_train data to be in same format as cherry_train
+final_train <- final_data 
+final_train <- final_train %>%
+  mutate(location = factor(location, levels = all_locations))
+final_train <- final_train %>%
+  mutate(across(matches("Chilling Period|Warming Period"), ~ replace_na(., 0)))
+final_train <- final_train %>%
+  mutate(weight = exp(Year - max(Year)))
+
+# Find the model matrix
+final_model_matrix <- model.matrix(bloom_doy ~ . - weight, data = final_train)[, -1]
+# Apply lasso
+lasso_fit <- glmnet(x = final_model_matrix,
+                    y = final_train$bloom_doy,
+                    family = "gaussian", alpha = 0, weights = final_train$weight)
+# K-fold cross validate
+set.seed(123)
+cv_fit <- replicated_cv_glmnet(
+  x = final_model_matrix,
+  y = final_train$bloom_doy,
+  replications = 10,  # Number of replications
+  family = "gaussian",
+  alpha = 0,  # Elastic Net (0 = Ridge, 1 = Lasso)
+  nfolds = 15  # Number of folds,
+)
+
+best_lambda <- cv_fit$lambda.min
+lambda_1se <- cv_fit$lambda.1se
+
+# Fit the final model using the optimal lambda
+combined_final_model <- glmnet(
+  x = final_model_matrix,
+  y = final_train$bloom_doy,
+  family = "gaussian",
+  alpha = 0,
+  lambda = best_lambda,
+  weights = final_train$weight
+)
+
+# Set up final_train in same format as final_train
+final_test <- data_2025 %>%
+  mutate(location = factor(location, levels = all_locations))
+final_test <- final_test %>%
+  mutate(across(matches("Chilling Period|Warming Period"), ~ replace_na(., 0))) %>%
+  select(-bloom_doy)
+
+# Ensure `data_2025` contains the same predictors as the training set
+# (No bloom_date, since it's the response variable)
+model_matrix_2025 <- model.matrix(~ ., data = final_test)[, -1]  # Remove intercept
+
+# Predict bloom date using the best lambda from cross-validation
+predicted_bloom_2025 <- predict(combined_final_model, s = best_lambda, newx = model_matrix_2025)
+predicted_results_2025 <- data.frame(Location = final_test$location, Predicted_Bloom_DOY = round(predicted_bloom_2025),
+                                     Year = 2025)
+# Print result
+predicted_results_2025 %>%
+  mutate(predicted_date = strptime(paste(Year, s1), "%Y %j") |> 
+           as_date())
+
+```
